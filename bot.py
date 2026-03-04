@@ -187,9 +187,37 @@ def categories_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def notes_keyboard(book_ref_id: int) -> InlineKeyboardMarkup:
+def note_button_label(text: str, created_at: str) -> str:
+    one_line = " ".join(text.split())
+    return compact_label(f"{created_at} | {one_line}", max_len=56)
+
+
+def category_notes_keyboard(
+    notes: list[tuple[int, str, str]], book_ref_id: int, category_ref_id: int
+) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text=note_button_label(text, created_at), callback_data=f"note:{note_id}"
+            )
+        ]
+        for note_id, text, created_at in notes
+    ]
+    buttons.append(
+        [InlineKeyboardButton(text="➕ Добавить", callback_data=f"catadd:{category_ref_id}")]
+    )
+    buttons.append(
+        [InlineKeyboardButton(text="⬅️ К категориям", callback_data=f"book:{book_ref_id}")]
+    )
+    buttons.append([InlineKeyboardButton(text="📚 К книгам", callback_data="browse_books")])
+    buttons.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="back_start")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def note_view_keyboard(book_ref_id: int, category_ref_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ К заметкам", callback_data=f"cat:{category_ref_id}")],
             [InlineKeyboardButton(text="⬅️ К категориям", callback_data=f"book:{book_ref_id}")],
             [InlineKeyboardButton(text="📚 К книгам", callback_data="browse_books")],
             [InlineKeyboardButton(text="⬅️ В меню", callback_data="back_start")],
@@ -218,6 +246,15 @@ def wait_category_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_note_input")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="back_start")],
+        ]
+    )
+
+
+def wait_note_in_category_keyboard(category_ref_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"cat:{category_ref_id}")],
             [InlineKeyboardButton(text="⬅️ В меню", callback_data="back_start")],
         ]
     )
@@ -271,32 +308,46 @@ def get_book_ref_id(user_id: int, book: str) -> Optional[int]:
     return row[0] if row and row[0] is not None else None
 
 
-def get_notes_by_book_category(
+def get_category_ref_id(user_id: int, book: str, category: str) -> Optional[int]:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            """
+            SELECT MIN(id)
+            FROM notes
+            WHERE user_id = ? AND book = ? AND category = ?
+            """,
+            (user_id, book, category),
+        ).fetchone()
+    return row[0] if row and row[0] is not None else None
+
+
+def get_category_notes(
     user_id: int, book: str, category: str
-) -> list[tuple[str, str, str, str]]:
+) -> list[tuple[int, str, str]]:
     with sqlite3.connect(DB_PATH) as conn:
         rows = conn.execute(
             """
-            SELECT text, book, category, created_at
+            SELECT id, text, created_at
             FROM notes
             WHERE user_id = ? AND book = ? AND category = ?
             ORDER BY id DESC
             """,
             (user_id, book, category),
         ).fetchall()
-    return rows
+    return [(row[0], row[1], row[2]) for row in rows]
 
 
-def format_notes_list(rows: list[tuple[str, str, str, str]], max_items: int = 10) -> str:
-    preview = rows[:max_items]
-    blocks = []
-    for idx, row in enumerate(preview, start=1):
-        text, _, _, created_at = row
-        blocks.append(f"{idx}. Дата: {created_at}\n\n   Текст: {text}")
-    result = "\n\n".join(blocks)
-    if len(rows) > max_items:
-        result += f"\n\nПоказано {max_items} из {len(rows)} заметок."
-    return result
+def get_note_by_id(user_id: int, note_id: int) -> Optional[tuple[str, str, str, str]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            """
+            SELECT text, book, category, created_at
+            FROM notes
+            WHERE user_id = ? AND id = ?
+            """,
+            (user_id, note_id),
+        ).fetchone()
+    return (row[0], row[1], row[2], row[3]) if row else None
 
 
 async def safe_edit_message(
@@ -392,7 +443,37 @@ async def on_waiting_book(message: Message, state: FSMContext) -> None:
 
 @router.message(StateFilter(NoteFSM.waiting_note), F.text)
 async def on_waiting_note(message: Message, state: FSMContext) -> None:
-    await state.update_data(text=message.text.strip())
+    data = await state.get_data()
+    text = message.text.strip()
+    fixed_book = data.get("book")
+    fixed_category = data.get("fixed_category")
+    category_ref_id = data.get("category_ref_id")
+
+    if fixed_book and fixed_category:
+        user_id = message.from_user.id
+        save_note(user_id=user_id, text=text, book=fixed_book, category=fixed_category)
+        await state.clear()
+
+        notes = get_category_notes(user_id, fixed_book, fixed_category)
+        book_ref_id = get_book_ref_id(user_id, fixed_book)
+        resolved_category_ref = (
+            get_category_ref_id(user_id, fixed_book, fixed_category) or category_ref_id
+        )
+
+        if not notes or book_ref_id is None or resolved_category_ref is None:
+            await message.answer("Заметка добавлена!", reply_markup=open_notes_keyboard())
+            return
+
+        await message.answer(
+            f"Заметка добавлена.\nКнига: {fixed_book}\nКатегория: {fixed_category}\n\n"
+            "Выбери заметку:",
+            reply_markup=category_notes_keyboard(
+                notes, book_ref_id=book_ref_id, category_ref_id=resolved_category_ref
+            ),
+        )
+        return
+
+    await state.update_data(text=text)
     await state.set_state(NoteFSM.waiting_category)
     await message.answer(
         "К какой категории/теме относится эта мысль?",
@@ -570,8 +651,8 @@ async def on_category_click(callback: CallbackQuery) -> None:
         return
 
     book, category = meta
-    rows = get_notes_by_book_category(user_id, book, category)
-    if not rows:
+    notes = get_category_notes(user_id, book, category)
+    if not notes:
         await callback.answer("Заметки не найдены", show_alert=True)
         return
 
@@ -582,8 +663,81 @@ async def on_category_click(callback: CallbackQuery) -> None:
 
     await safe_edit_message(
         callback.message,
-        f"Книга: {book}\nКатегория: {category}\n\n{format_notes_list(rows)}",
-        reply_markup=notes_keyboard(book_ref_id),
+        f"Книга: {book}\nКатегория: {category}\n\nВыбери заметку:",
+        reply_markup=category_notes_keyboard(
+            notes,
+            book_ref_id=book_ref_id,
+            category_ref_id=category_ref_id,
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("catadd:"))
+async def on_category_add_note(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        await callback.answer("Сообщение недоступно", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    ref_raw = callback.data.split(":", maxsplit=1)[1]
+    if not ref_raw.isdigit():
+        await callback.answer("Некорректная кнопка", show_alert=True)
+        return
+
+    category_ref_id = int(ref_raw)
+    meta = get_note_meta_by_ref(user_id, category_ref_id)
+    if not meta:
+        await callback.answer("Категория не найдена", show_alert=True)
+        return
+
+    book, category = meta
+    await state.clear()
+    await state.set_data(
+        {
+            "book": book,
+            "fixed_category": category,
+            "category_ref_id": category_ref_id,
+        }
+    )
+    await state.set_state(NoteFSM.waiting_note)
+    await safe_edit_message(
+        callback.message,
+        f"Книга: {book}\nКатегория: {category}\n\nОтправь текст новой заметки.",
+        reply_markup=wait_note_in_category_keyboard(category_ref_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("note:"))
+async def on_note_click(callback: CallbackQuery) -> None:
+    if callback.message is None:
+        await callback.answer("Сообщение недоступно", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    ref_raw = callback.data.split(":", maxsplit=1)[1]
+    if not ref_raw.isdigit():
+        await callback.answer("Некорректная кнопка", show_alert=True)
+        return
+
+    note_id = int(ref_raw)
+    note = get_note_by_id(user_id, note_id)
+    if not note:
+        await callback.answer("Заметка не найдена", show_alert=True)
+        return
+
+    _, book, category, _ = note
+    book_ref_id = get_book_ref_id(user_id, book)
+    category_ref_id = get_category_ref_id(user_id, book, category)
+    if book_ref_id is None or category_ref_id is None:
+        await callback.answer("Навигация недоступна", show_alert=True)
+        return
+
+    await safe_edit_message(
+        callback.message,
+        format_note(note),
+        reply_markup=note_view_keyboard(book_ref_id, category_ref_id),
     )
     await callback.answer()
 
