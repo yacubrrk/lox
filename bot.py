@@ -151,6 +151,7 @@ def books_keyboard(books: list[tuple[int, str]]) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=compact_label(book), callback_data=f"book:{ref_id}")]
         for ref_id, book in books
     ]
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_start")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -166,7 +167,8 @@ def add_flow_keyboard() -> InlineKeyboardMarkup:
 def open_notes_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📚 Мои книги", callback_data="browse_books")]
+            [InlineKeyboardButton(text="📚 Мои книги", callback_data="browse_books")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_start")],
         ]
     )
 
@@ -181,9 +183,7 @@ def categories_keyboard(
     buttons.append(
         [InlineKeyboardButton(text="⬅️ К книгам", callback_data="browse_books")]
     )
-    buttons.append(
-        [InlineKeyboardButton(text="📚 Обновить категории", callback_data=f"book:{book_ref_id}")]
-    )
+    buttons.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="back_start")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -192,6 +192,33 @@ def notes_keyboard(book_ref_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ К категориям", callback_data=f"book:{book_ref_id}")],
             [InlineKeyboardButton(text="📚 К книгам", callback_data="browse_books")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="back_start")],
+        ]
+    )
+
+
+def wait_book_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_start")],
+        ]
+    )
+
+
+def wait_note_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_book_input")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="back_start")],
+        ]
+    )
+
+
+def wait_category_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_note_input")],
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="back_start")],
         ]
     )
 
@@ -296,7 +323,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 async def cmd_add(message: Message, state: FSMContext) -> None:
     await state.clear()
     await state.set_state(NoteFSM.waiting_book)
-    await message.answer("Напиши название книги.")
+    await message.answer("Напиши название книги.", reply_markup=wait_book_keyboard())
 
 
 @router.message(Command("library"))
@@ -304,7 +331,7 @@ async def cmd_library(message: Message) -> None:
     user_id = message.from_user.id
     books = get_books(user_id)
     if not books:
-        await message.answer("Пока нет заметок по книгам.")
+        await message.answer("Пока нет заметок по книгам.", reply_markup=add_flow_keyboard())
         return
     await message.answer("Выбери книгу:", reply_markup=books_keyboard(books))
 
@@ -360,14 +387,17 @@ async def cmd_random(message: Message) -> None:
 async def on_waiting_book(message: Message, state: FSMContext) -> None:
     await state.update_data(book=message.text.strip())
     await state.set_state(NoteFSM.waiting_note)
-    await message.answer("Отправь текст заметки.")
+    await message.answer("Отправь текст заметки.", reply_markup=wait_note_keyboard())
 
 
 @router.message(StateFilter(NoteFSM.waiting_note), F.text)
 async def on_waiting_note(message: Message, state: FSMContext) -> None:
     await state.update_data(text=message.text.strip())
     await state.set_state(NoteFSM.waiting_category)
-    await message.answer("К какой категории/теме относится эта мысль?")
+    await message.answer(
+        "К какой категории/теме относится эта мысль?",
+        reply_markup=wait_category_keyboard(),
+    )
 
 
 @router.message(StateFilter(NoteFSM.waiting_category), F.text)
@@ -402,7 +432,67 @@ async def on_newnote_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.set_state(NoteFSM.waiting_book)
     await callback.answer()
-    await callback.message.answer("Напиши название книги.")
+    await callback.message.answer("Напиши название книги.", reply_markup=wait_book_keyboard())
+
+
+@router.callback_query(F.data == "back_start")
+async def on_back_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        await callback.answer("Сообщение недоступно", show_alert=True)
+        return
+
+    await state.clear()
+    await safe_edit_message(
+        callback.message,
+        "Выбери действие:",
+        reply_markup=add_flow_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_book_input")
+async def on_back_to_book_input(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        await callback.answer("Сообщение недоступно", show_alert=True)
+        return
+
+    await state.set_data({})
+    await state.set_state(NoteFSM.waiting_book)
+    await safe_edit_message(
+        callback.message,
+        "Напиши название книги.",
+        reply_markup=wait_book_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_note_input")
+async def on_back_to_note_input(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.message is None:
+        await callback.answer("Сообщение недоступно", show_alert=True)
+        return
+
+    data = await state.get_data()
+    book = data.get("book")
+    if not book:
+        await state.set_data({})
+        await state.set_state(NoteFSM.waiting_book)
+        await safe_edit_message(
+            callback.message,
+            "Напиши название книги.",
+            reply_markup=wait_book_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    await state.set_data({"book": book})
+    await state.set_state(NoteFSM.waiting_note)
+    await safe_edit_message(
+        callback.message,
+        "Отправь текст заметки.",
+        reply_markup=wait_note_keyboard(),
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "browse_books")
@@ -414,7 +504,11 @@ async def on_browse_books(callback: CallbackQuery) -> None:
     user_id = callback.from_user.id
     books = get_books(user_id)
     if not books:
-        await safe_edit_message(callback.message, "Пока нет заметок по книгам.")
+        await safe_edit_message(
+            callback.message,
+            "Пока нет заметок по книгам.\n\nВыбери действие:",
+            reply_markup=add_flow_keyboard(),
+        )
         await callback.answer()
         return
 
