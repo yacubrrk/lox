@@ -130,12 +130,29 @@ def get_random_note(user_id: int) -> tuple[str, str, str, str] | None:
     return row
 
 
+def format_created_at(created_at: str) -> str:
+    known_formats = (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y.%m.%d %H:%M:%S",
+        "%Y.%m.%d %H:%M",
+    )
+    for fmt in known_formats:
+        try:
+            dt = datetime.strptime(created_at, fmt)
+            return dt.strftime("%Y.%m.%d %H:%M")
+        except ValueError:
+            continue
+    return created_at
+
+
 def format_note(row: tuple[str, str, str, str]) -> str:
     text, book, category, created_at = row
+    display_created_at = format_created_at(created_at)
     return (
         f"Книга: {book}\n"
         f"Категория: {category}\n"
-        f"Дата: {created_at}\n\n"
+        f"Дата: {display_created_at}\n\n"
         f"Текст: {text}"
     )
 
@@ -189,7 +206,8 @@ def categories_keyboard(
 
 def note_button_label(text: str, created_at: str) -> str:
     one_line = " ".join(text.split())
-    return compact_label(f"{created_at} | {one_line}", max_len=56)
+    display_created_at = format_created_at(created_at)
+    return compact_label(f"{display_created_at} | {one_line}", max_len=56)
 
 
 def category_notes_keyboard(
