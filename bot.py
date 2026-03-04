@@ -154,28 +154,19 @@ def books_keyboard(books: list[tuple[int, str]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def add_flow_keyboard(books: list[tuple[int, str]]) -> InlineKeyboardMarkup:
-    buttons = [
-        [
-            InlineKeyboardButton(
-                text=compact_label(book), callback_data=f"newnote_book:{ref_id}"
-            )
+def add_flow_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить", callback_data="newnote_add")],
+            [InlineKeyboardButton(text="📚 Мои книги", callback_data="browse_books")],
         ]
-        for ref_id, book in books
-    ]
-    buttons.append(
-        [InlineKeyboardButton(text="➕ Добавить", callback_data="newnote_add")]
     )
-    buttons.append(
-        [InlineKeyboardButton(text="📚 Мои заметки", callback_data="browse_books")]
-    )
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def open_notes_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📚 Мои заметки", callback_data="browse_books")]
+            [InlineKeyboardButton(text="📚 Мои книги", callback_data="browse_books")]
         ]
     )
 
@@ -295,17 +286,17 @@ async def safe_edit_message(
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
-    user_id = message.from_user.id
-    books = get_books(user_id)
     await message.answer(
-        "Выбери книгу для новой карточки или нажми «Добавить».",
-        reply_markup=add_flow_keyboard(books),
+        "Выбери действие:",
+        reply_markup=add_flow_keyboard(),
     )
 
 
 @router.message(Command("add"))
 async def cmd_add(message: Message, state: FSMContext) -> None:
-    await cmd_start(message, state)
+    await state.clear()
+    await state.set_state(NoteFSM.waiting_book)
+    await message.answer("Напиши название книги.")
 
 
 @router.message(Command("library"))
@@ -320,7 +311,7 @@ async def cmd_library(message: Message) -> None:
 
 @router.message(Command("notes"))
 async def cmd_notes(message: Message) -> None:
-    await message.answer("Открой список заметок:", reply_markup=open_notes_keyboard())
+    await message.answer("Открой список книг:", reply_markup=open_notes_keyboard())
 
 
 @router.message(Command("categories"))
@@ -412,30 +403,6 @@ async def on_newnote_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(NoteFSM.waiting_book)
     await callback.answer()
     await callback.message.answer("Напиши название книги.")
-
-
-@router.callback_query(F.data.startswith("newnote_book:"))
-async def on_newnote_book_click(callback: CallbackQuery, state: FSMContext) -> None:
-    if callback.message is None:
-        await callback.answer("Сообщение недоступно", show_alert=True)
-        return
-
-    ref_raw = callback.data.split(":", maxsplit=1)[1]
-    if not ref_raw.isdigit():
-        await callback.answer("Некорректная кнопка", show_alert=True)
-        return
-
-    user_id = callback.from_user.id
-    book = get_book_by_ref(user_id, int(ref_raw))
-    if not book:
-        await callback.answer("Книга не найдена", show_alert=True)
-        return
-
-    await state.clear()
-    await state.update_data(book=book)
-    await state.set_state(NoteFSM.waiting_note)
-    await callback.answer()
-    await callback.message.answer(f"Книга выбрана: {book}\n\nОтправь текст заметки.")
 
 
 @router.callback_query(F.data == "browse_books")
