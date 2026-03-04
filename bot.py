@@ -175,7 +175,7 @@ def books_keyboard(books: list[tuple[int, str]]) -> InlineKeyboardMarkup:
 def add_flow_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Добавить", callback_data="newnote_add")],
+            [InlineKeyboardButton(text="➕ Добавить книгу", callback_data="newnote_add")],
             [InlineKeyboardButton(text="📚 Мои книги", callback_data="browse_books")],
         ]
     )
