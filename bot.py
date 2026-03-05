@@ -70,6 +70,36 @@ def save_note(user_id: int, text: str, book: str, category: str) -> None:
         conn.commit()
 
 
+def delete_book(user_id: int, book: str) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "DELETE FROM notes WHERE user_id = ? AND book = ?",
+            (user_id, book),
+        )
+        conn.commit()
+    return cursor.rowcount
+
+
+def delete_category(user_id: int, book: str, category: str) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "DELETE FROM notes WHERE user_id = ? AND book = ? AND category = ?",
+            (user_id, book, category),
+        )
+        conn.commit()
+    return cursor.rowcount
+
+
+def delete_note(user_id: int, note_id: int) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "DELETE FROM notes WHERE user_id = ? AND id = ?",
+            (user_id, note_id),
+        )
+        conn.commit()
+    return cursor.rowcount
+
+
 def get_books(user_id: int) -> list[tuple[int, str]]:
     with sqlite3.connect(DB_PATH) as conn:
         rows = conn.execute(
@@ -164,10 +194,14 @@ def compact_label(text: str, max_len: int = 48) -> str:
 
 
 def books_keyboard(books: list[tuple[int, str]]) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(text=compact_label(book), callback_data=f"book:{ref_id}")]
-        for ref_id, book in books
-    ]
+    buttons = []
+    for ref_id, book in books:
+        buttons.append(
+            [
+                InlineKeyboardButton(text=compact_label(book), callback_data=f"book:{ref_id}"),
+                InlineKeyboardButton(text="🗑", callback_data=f"delbook:{ref_id}"),
+            ]
+        )
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_start")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -193,10 +227,16 @@ def open_notes_keyboard() -> InlineKeyboardMarkup:
 def categories_keyboard(
     categories: list[tuple[int, str]], book_ref_id: int
 ) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(text=compact_label(category), callback_data=f"cat:{ref_id}")]
-        for ref_id, category in categories
-    ]
+    buttons = []
+    for ref_id, category in categories:
+        buttons.append(
+            [
+                InlineKeyboardButton(text=compact_label(category), callback_data=f"cat:{ref_id}"),
+                InlineKeyboardButton(
+                    text="🗑", callback_data=f"delcat:{ref_id}:{book_ref_id}"
+                ),
+            ]
+        )
     buttons.append(
         [InlineKeyboardButton(text="⬅️ К книгам", callback_data="browse_books")]
     )
@@ -213,14 +253,18 @@ def note_button_label(text: str, created_at: str) -> str:
 def category_notes_keyboard(
     notes: list[tuple[int, str, str]], book_ref_id: int, category_ref_id: int
 ) -> InlineKeyboardMarkup:
-    buttons = [
-        [
-            InlineKeyboardButton(
-                text=note_button_label(text, created_at), callback_data=f"note:{note_id}"
-            )
-        ]
-        for note_id, text, created_at in notes
-    ]
+    buttons = []
+    for note_id, text, created_at in notes:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=note_button_label(text, created_at), callback_data=f"note:{note_id}"
+                ),
+                InlineKeyboardButton(
+                    text="🗑", callback_data=f"delnote:{note_id}:{category_ref_id}"
+                ),
+            ]
+        )
     buttons.append(
         [InlineKeyboardButton(text="➕ Добавить", callback_data=f"catadd:{category_ref_id}")]
     )
@@ -232,9 +276,15 @@ def category_notes_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def note_view_keyboard(book_ref_id: int, category_ref_id: int) -> InlineKeyboardMarkup:
+def note_view_keyboard(book_ref_id: int, category_ref_id: int, note_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🗑 Удалить заметку",
+                    callback_data=f"delnote:{note_id}:{category_ref_id}",
+                )
+            ],
             [InlineKeyboardButton(text="⬅️ К заметкам", callback_data=f"cat:{category_ref_id}")],
             [InlineKeyboardButton(text="⬅️ К категориям", callback_data=f"book:{book_ref_id}")],
             [InlineKeyboardButton(text="📚 К книгам", callback_data="browse_books")],
@@ -650,6 +700,41 @@ async def on_book_click(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("delbook:"))
+async def on_delete_book(callback: CallbackQuery) -> None:
+    if callback.message is None:
+        await callback.answer("Сообщение недоступно", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    ref_raw = callback.data.split(":", maxsplit=1)[1]
+    if not ref_raw.isdigit():
+        await callback.answer("Некорректная кнопка", show_alert=True)
+        return
+
+    book_ref_id = int(ref_raw)
+    book = get_book_by_ref(user_id, book_ref_id)
+    if not book:
+        await callback.answer("Книга уже удалена", show_alert=True)
+        return
+
+    delete_book(user_id, book)
+    books = get_books(user_id)
+    if books:
+        await safe_edit_message(
+            callback.message,
+            "Книга удалена.\n\nВыбери книгу:",
+            reply_markup=books_keyboard(books),
+        )
+    else:
+        await safe_edit_message(
+            callback.message,
+            "Книга удалена.\n\nПока нет заметок по книгам.\n\nВыбери действие:",
+            reply_markup=add_flow_keyboard(),
+        )
+    await callback.answer("Книга удалена")
+
+
 @router.callback_query(F.data.startswith("cat:"))
 async def on_category_click(callback: CallbackQuery) -> None:
     if callback.message is None:
@@ -691,6 +776,56 @@ async def on_category_click(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("delcat:"))
+async def on_delete_category(callback: CallbackQuery) -> None:
+    if callback.message is None:
+        await callback.answer("Сообщение недоступно", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    parts = callback.data.split(":")
+    if len(parts) < 2 or not parts[1].isdigit():
+        await callback.answer("Некорректная кнопка", show_alert=True)
+        return
+
+    category_ref_id = int(parts[1])
+    meta = get_note_meta_by_ref(user_id, category_ref_id)
+    if not meta:
+        await callback.answer("Категория уже удалена", show_alert=True)
+        return
+
+    book, category = meta
+    delete_category(user_id, book, category)
+
+    categories = get_categories_by_book(user_id, book)
+    book_ref_id = get_book_ref_id(user_id, book)
+    if categories and book_ref_id is not None:
+        await safe_edit_message(
+            callback.message,
+            f"Категория удалена.\n\nКнига: {book}\nВыбери категорию:",
+            reply_markup=categories_keyboard(categories, book_ref_id),
+        )
+        await callback.answer("Категория удалена")
+        return
+
+    books = get_books(user_id)
+    if books:
+        await safe_edit_message(
+            callback.message,
+            "Категория удалена.\n\nВыбери книгу:",
+            reply_markup=books_keyboard(books),
+        )
+        await callback.answer("Категория удалена")
+        return
+
+    await safe_edit_message(
+        callback.message,
+        "Категория удалена.\n\nПока нет заметок по книгам.\n\nВыбери действие:",
+        reply_markup=add_flow_keyboard(),
+    )
+    await callback.answer("Категория удалена")
+
+
 @router.callback_query(F.data.startswith("catadd:"))
 async def on_category_add_note(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.message is None:
@@ -727,6 +862,71 @@ async def on_category_add_note(callback: CallbackQuery, state: FSMContext) -> No
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("delnote:"))
+async def on_delete_note(callback: CallbackQuery) -> None:
+    if callback.message is None:
+        await callback.answer("Сообщение недоступно", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    parts = callback.data.split(":")
+    if len(parts) < 2 or not parts[1].isdigit():
+        await callback.answer("Некорректная кнопка", show_alert=True)
+        return
+
+    note_id = int(parts[1])
+    note = get_note_by_id(user_id, note_id)
+    if not note:
+        await callback.answer("Заметка уже удалена", show_alert=True)
+        return
+
+    _, book, category, _ = note
+    delete_note(user_id, note_id)
+
+    notes = get_category_notes(user_id, book, category)
+    book_ref_id = get_book_ref_id(user_id, book)
+    category_ref_id = get_category_ref_id(user_id, book, category)
+    if notes and book_ref_id is not None and category_ref_id is not None:
+        await safe_edit_message(
+            callback.message,
+            f"Заметка удалена.\n\nКнига: {book}\nКатегория: {category}\n\nВыбери заметку:",
+            reply_markup=category_notes_keyboard(
+                notes,
+                book_ref_id=book_ref_id,
+                category_ref_id=category_ref_id,
+            ),
+        )
+        await callback.answer("Заметка удалена")
+        return
+
+    categories = get_categories_by_book(user_id, book)
+    if categories and book_ref_id is not None:
+        await safe_edit_message(
+            callback.message,
+            f"Заметка удалена.\n\nКнига: {book}\nВыбери категорию:",
+            reply_markup=categories_keyboard(categories, book_ref_id),
+        )
+        await callback.answer("Заметка удалена")
+        return
+
+    books = get_books(user_id)
+    if books:
+        await safe_edit_message(
+            callback.message,
+            "Заметка удалена.\n\nВыбери книгу:",
+            reply_markup=books_keyboard(books),
+        )
+        await callback.answer("Заметка удалена")
+        return
+
+    await safe_edit_message(
+        callback.message,
+        "Заметка удалена.\n\nПока нет заметок по книгам.\n\nВыбери действие:",
+        reply_markup=add_flow_keyboard(),
+    )
+    await callback.answer("Заметка удалена")
+
+
 @router.callback_query(F.data.startswith("note:"))
 async def on_note_click(callback: CallbackQuery) -> None:
     if callback.message is None:
@@ -755,7 +955,7 @@ async def on_note_click(callback: CallbackQuery) -> None:
     await safe_edit_message(
         callback.message,
         format_note(note),
-        reply_markup=note_view_keyboard(book_ref_id, category_ref_id),
+        reply_markup=note_view_keyboard(book_ref_id, category_ref_id, note_id),
     )
     await callback.answer()
 
