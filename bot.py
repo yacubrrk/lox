@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import os
 import sqlite3
 from datetime import datetime
@@ -15,8 +14,6 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 DB_PATH = "notes.db"
 router = Router()
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-logger = logging.getLogger(__name__)
 
 
 class NoteFSM(StatesGroup):
@@ -71,54 +68,6 @@ def save_note(user_id: int, text: str, book: str, category: str) -> None:
             (user_id, text, book, category, created_at),
         )
         conn.commit()
-
-
-def delete_book(user_id: int, book: str) -> int:
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute(
-            "DELETE FROM notes WHERE user_id = ? AND book = ?",
-            (user_id, book),
-        )
-        conn.commit()
-    return cursor.rowcount
-
-
-def delete_category(user_id: int, book: str, category: str) -> int:
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute(
-            "DELETE FROM notes WHERE user_id = ? AND book = ? AND category = ?",
-            (user_id, book, category),
-        )
-        conn.commit()
-    return cursor.rowcount
-
-
-def delete_note(user_id: int, note_id: int) -> int:
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute(
-            "DELETE FROM notes WHERE user_id = ? AND id = ?",
-            (user_id, note_id),
-        )
-        conn.commit()
-    return cursor.rowcount
-
-
-def count_book_notes(user_id: int, book: str) -> int:
-    with sqlite3.connect(DB_PATH) as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM notes WHERE user_id = ? AND book = ?",
-            (user_id, book),
-        ).fetchone()
-    return int(row[0]) if row else 0
-
-
-def count_category_notes(user_id: int, book: str, category: str) -> int:
-    with sqlite3.connect(DB_PATH) as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM notes WHERE user_id = ? AND book = ? AND category = ?",
-            (user_id, book, category),
-        ).fetchone()
-    return int(row[0]) if row else 0
 
 
 def get_books(user_id: int) -> list[tuple[int, str]]:
@@ -215,14 +164,10 @@ def compact_label(text: str, max_len: int = 48) -> str:
 
 
 def books_keyboard(books: list[tuple[int, str]]) -> InlineKeyboardMarkup:
-    buttons = []
-    for ref_id, book in books:
-        buttons.append(
-            [
-                InlineKeyboardButton(text=compact_label(book), callback_data=f"book:{ref_id}"),
-                InlineKeyboardButton(text="ˣ", callback_data=f"ask_delbook:{ref_id}"),
-            ]
-        )
+    buttons = [
+        [InlineKeyboardButton(text=compact_label(book), callback_data=f"book:{ref_id}")]
+        for ref_id, book in books
+    ]
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_start")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -248,16 +193,10 @@ def open_notes_keyboard() -> InlineKeyboardMarkup:
 def categories_keyboard(
     categories: list[tuple[int, str]], book_ref_id: int
 ) -> InlineKeyboardMarkup:
-    buttons = []
-    for ref_id, category in categories:
-        buttons.append(
-            [
-                InlineKeyboardButton(text=compact_label(category), callback_data=f"cat:{ref_id}"),
-                InlineKeyboardButton(
-                    text="ˣ", callback_data=f"ask_delcat:{ref_id}:{book_ref_id}"
-                ),
-            ]
-        )
+    buttons = [
+        [InlineKeyboardButton(text=compact_label(category), callback_data=f"cat:{ref_id}")]
+        for ref_id, category in categories
+    ]
     buttons.append(
         [InlineKeyboardButton(text="⬅️ К книгам", callback_data="browse_books")]
     )
@@ -274,18 +213,14 @@ def note_button_label(text: str, created_at: str) -> str:
 def category_notes_keyboard(
     notes: list[tuple[int, str, str]], book_ref_id: int, category_ref_id: int
 ) -> InlineKeyboardMarkup:
-    buttons = []
-    for note_id, text, created_at in notes:
-        buttons.append(
-            [
-                InlineKeyboardButton(
-                    text=note_button_label(text, created_at), callback_data=f"note:{note_id}"
-                ),
-                InlineKeyboardButton(
-                    text="ˣ", callback_data=f"ask_delnote:{note_id}:{category_ref_id}"
-                ),
-            ]
-        )
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text=note_button_label(text, created_at), callback_data=f"note:{note_id}"
+            )
+        ]
+        for note_id, text, created_at in notes
+    ]
     buttons.append(
         [InlineKeyboardButton(text="➕ Добавить", callback_data=f"catadd:{category_ref_id}")]
     )
@@ -297,28 +232,13 @@ def category_notes_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def note_view_keyboard(book_ref_id: int, category_ref_id: int, note_id: int) -> InlineKeyboardMarkup:
+def note_view_keyboard(book_ref_id: int, category_ref_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="ˣ",
-                    callback_data=f"ask_delnote:{note_id}:{category_ref_id}",
-                )
-            ],
             [InlineKeyboardButton(text="⬅️ К заметкам", callback_data=f"cat:{category_ref_id}")],
             [InlineKeyboardButton(text="⬅️ К категориям", callback_data=f"book:{book_ref_id}")],
             [InlineKeyboardButton(text="📚 К книгам", callback_data="browse_books")],
             [InlineKeyboardButton(text="⬅️ В меню", callback_data="back_start")],
-        ]
-    )
-
-
-def confirm_delete_keyboard(confirm_data: str, cancel_data: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Удалить", callback_data=confirm_data)],
-            [InlineKeyboardButton(text="⬅️ Отмена", callback_data=cancel_data)],
         ]
     )
 
@@ -730,73 +650,6 @@ async def on_book_click(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("delbook:"))
-async def on_delete_book(callback: CallbackQuery) -> None:
-    if callback.message is None:
-        await callback.answer("Сообщение недоступно", show_alert=True)
-        return
-
-    user_id = callback.from_user.id
-    ref_raw = callback.data.split(":", maxsplit=1)[1]
-    if not ref_raw.isdigit():
-        await callback.answer("Некорректная кнопка", show_alert=True)
-        return
-
-    book_ref_id = int(ref_raw)
-    book = get_book_by_ref(user_id, book_ref_id)
-    if not book:
-        await callback.answer("Книга уже удалена", show_alert=True)
-        return
-
-    deleted = delete_book(user_id, book)
-    logger.info("DELETE_BOOK user_id=%s book=%s deleted=%s", user_id, book, deleted)
-    books = get_books(user_id)
-    if books:
-        await safe_edit_message(
-            callback.message,
-            "Книга удалена.\n\nВыбери книгу:",
-            reply_markup=books_keyboard(books),
-        )
-    else:
-        await safe_edit_message(
-            callback.message,
-            "Книга удалена.\n\nПока нет заметок по книгам.\n\nВыбери действие:",
-            reply_markup=add_flow_keyboard(),
-        )
-    await callback.answer("Книга удалена")
-
-
-@router.callback_query(F.data.startswith("ask_delbook:"))
-async def on_ask_delete_book(callback: CallbackQuery) -> None:
-    if callback.message is None:
-        await callback.answer("Сообщение недоступно", show_alert=True)
-        return
-
-    user_id = callback.from_user.id
-    ref_raw = callback.data.split(":", maxsplit=1)[1]
-    if not ref_raw.isdigit():
-        await callback.answer("Некорректная кнопка", show_alert=True)
-        return
-
-    book_ref_id = int(ref_raw)
-    logger.info("ASK_DELETE_BOOK callback=%s user_id=%s", callback.data, user_id)
-    book = get_book_by_ref(user_id, book_ref_id)
-    if not book:
-        await callback.answer("Книга не найдена", show_alert=True)
-        return
-
-    notes_count = count_book_notes(user_id, book)
-    await safe_edit_message(
-        callback.message,
-        f"Удалить книгу «{book}»?\nБудет удалено заметок: {notes_count}",
-        reply_markup=confirm_delete_keyboard(
-            confirm_data=f"delbook:{book_ref_id}",
-            cancel_data="browse_books",
-        ),
-    )
-    await callback.answer()
-
-
 @router.callback_query(F.data.startswith("cat:"))
 async def on_category_click(callback: CallbackQuery) -> None:
     if callback.message is None:
@@ -838,96 +691,6 @@ async def on_category_click(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("delcat:"))
-async def on_delete_category(callback: CallbackQuery) -> None:
-    if callback.message is None:
-        await callback.answer("Сообщение недоступно", show_alert=True)
-        return
-
-    user_id = callback.from_user.id
-    parts = callback.data.split(":")
-    if len(parts) < 2 or not parts[1].isdigit():
-        await callback.answer("Некорректная кнопка", show_alert=True)
-        return
-
-    category_ref_id = int(parts[1])
-    meta = get_note_meta_by_ref(user_id, category_ref_id)
-    if not meta:
-        await callback.answer("Категория уже удалена", show_alert=True)
-        return
-
-    book, category = meta
-    deleted = delete_category(user_id, book, category)
-    logger.info(
-        "DELETE_CATEGORY user_id=%s book=%s category=%s deleted=%s",
-        user_id,
-        book,
-        category,
-        deleted,
-    )
-
-    categories = get_categories_by_book(user_id, book)
-    book_ref_id = get_book_ref_id(user_id, book)
-    if categories and book_ref_id is not None:
-        await safe_edit_message(
-            callback.message,
-            f"Категория удалена.\n\nКнига: {book}\nВыбери категорию:",
-            reply_markup=categories_keyboard(categories, book_ref_id),
-        )
-        await callback.answer("Категория удалена")
-        return
-
-    books = get_books(user_id)
-    if books:
-        await safe_edit_message(
-            callback.message,
-            "Категория удалена.\n\nВыбери книгу:",
-            reply_markup=books_keyboard(books),
-        )
-        await callback.answer("Категория удалена")
-        return
-
-    await safe_edit_message(
-        callback.message,
-        "Категория удалена.\n\nПока нет заметок по книгам.\n\nВыбери действие:",
-        reply_markup=add_flow_keyboard(),
-    )
-    await callback.answer("Категория удалена")
-
-
-@router.callback_query(F.data.startswith("ask_delcat:"))
-async def on_ask_delete_category(callback: CallbackQuery) -> None:
-    if callback.message is None:
-        await callback.answer("Сообщение недоступно", show_alert=True)
-        return
-
-    user_id = callback.from_user.id
-    parts = callback.data.split(":")
-    if len(parts) < 3 or not parts[1].isdigit() or not parts[2].isdigit():
-        await callback.answer("Некорректная кнопка", show_alert=True)
-        return
-
-    category_ref_id = int(parts[1])
-    book_ref_id = int(parts[2])
-    logger.info("ASK_DELETE_CATEGORY callback=%s user_id=%s", callback.data, user_id)
-    meta = get_note_meta_by_ref(user_id, category_ref_id)
-    if not meta:
-        await callback.answer("Категория не найдена", show_alert=True)
-        return
-
-    book, category = meta
-    notes_count = count_category_notes(user_id, book, category)
-    await safe_edit_message(
-        callback.message,
-        f"Удалить категорию «{category}»?\nБудет удалено заметок: {notes_count}",
-        reply_markup=confirm_delete_keyboard(
-            confirm_data=f"delcat:{category_ref_id}:{book_ref_id}",
-            cancel_data=f"book:{book_ref_id}",
-        ),
-    )
-    await callback.answer()
-
-
 @router.callback_query(F.data.startswith("catadd:"))
 async def on_category_add_note(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.message is None:
@@ -964,111 +727,6 @@ async def on_category_add_note(callback: CallbackQuery, state: FSMContext) -> No
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("delnote:"))
-async def on_delete_note(callback: CallbackQuery) -> None:
-    if callback.message is None:
-        await callback.answer("Сообщение недоступно", show_alert=True)
-        return
-
-    user_id = callback.from_user.id
-    parts = callback.data.split(":")
-    if len(parts) < 2 or not parts[1].isdigit():
-        await callback.answer("Некорректная кнопка", show_alert=True)
-        return
-
-    note_id = int(parts[1])
-    note = get_note_by_id(user_id, note_id)
-    if not note:
-        await callback.answer("Заметка уже удалена", show_alert=True)
-        return
-
-    _, book, category, _ = note
-    deleted = delete_note(user_id, note_id)
-    logger.info(
-        "DELETE_NOTE user_id=%s note_id=%s book=%s category=%s deleted=%s",
-        user_id,
-        note_id,
-        book,
-        category,
-        deleted,
-    )
-
-    notes = get_category_notes(user_id, book, category)
-    book_ref_id = get_book_ref_id(user_id, book)
-    category_ref_id = get_category_ref_id(user_id, book, category)
-    if notes and book_ref_id is not None and category_ref_id is not None:
-        await safe_edit_message(
-            callback.message,
-            f"Заметка удалена.\n\nКнига: {book}\nКатегория: {category}\n\nВыбери заметку:",
-            reply_markup=category_notes_keyboard(
-                notes,
-                book_ref_id=book_ref_id,
-                category_ref_id=category_ref_id,
-            ),
-        )
-        await callback.answer("Заметка удалена")
-        return
-
-    categories = get_categories_by_book(user_id, book)
-    if categories and book_ref_id is not None:
-        await safe_edit_message(
-            callback.message,
-            f"Заметка удалена.\n\nКнига: {book}\nВыбери категорию:",
-            reply_markup=categories_keyboard(categories, book_ref_id),
-        )
-        await callback.answer("Заметка удалена")
-        return
-
-    books = get_books(user_id)
-    if books:
-        await safe_edit_message(
-            callback.message,
-            "Заметка удалена.\n\nВыбери книгу:",
-            reply_markup=books_keyboard(books),
-        )
-        await callback.answer("Заметка удалена")
-        return
-
-    await safe_edit_message(
-        callback.message,
-        "Заметка удалена.\n\nПока нет заметок по книгам.\n\nВыбери действие:",
-        reply_markup=add_flow_keyboard(),
-    )
-    await callback.answer("Заметка удалена")
-
-
-@router.callback_query(F.data.startswith("ask_delnote:"))
-async def on_ask_delete_note(callback: CallbackQuery) -> None:
-    if callback.message is None:
-        await callback.answer("Сообщение недоступно", show_alert=True)
-        return
-
-    user_id = callback.from_user.id
-    parts = callback.data.split(":")
-    if len(parts) < 3 or not parts[1].isdigit() or not parts[2].isdigit():
-        await callback.answer("Некорректная кнопка", show_alert=True)
-        return
-
-    note_id = int(parts[1])
-    category_ref_id = int(parts[2])
-    logger.info("ASK_DELETE_NOTE callback=%s user_id=%s", callback.data, user_id)
-    note = get_note_by_id(user_id, note_id)
-    if not note:
-        await callback.answer("Заметка не найдена", show_alert=True)
-        return
-
-    text_preview = compact_label(note[0], max_len=42)
-    await safe_edit_message(
-        callback.message,
-        f"Удалить только эту заметку?\nБудет удалено заметок: 1\n\n{text_preview}",
-        reply_markup=confirm_delete_keyboard(
-            confirm_data=f"delnote:{note_id}:{category_ref_id}",
-            cancel_data=f"cat:{category_ref_id}",
-        ),
-    )
-    await callback.answer()
-
-
 @router.callback_query(F.data.startswith("note:"))
 async def on_note_click(callback: CallbackQuery) -> None:
     if callback.message is None:
@@ -1097,7 +755,7 @@ async def on_note_click(callback: CallbackQuery) -> None:
     await safe_edit_message(
         callback.message,
         format_note(note),
-        reply_markup=note_view_keyboard(book_ref_id, category_ref_id, note_id),
+        reply_markup=note_view_keyboard(book_ref_id, category_ref_id),
     )
     await callback.answer()
 
