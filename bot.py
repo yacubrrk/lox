@@ -100,6 +100,24 @@ def delete_note(user_id: int, note_id: int) -> int:
     return cursor.rowcount
 
 
+def count_book_notes(user_id: int, book: str) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM notes WHERE user_id = ? AND book = ?",
+            (user_id, book),
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def count_category_notes(user_id: int, book: str, category: str) -> int:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM notes WHERE user_id = ? AND book = ? AND category = ?",
+            (user_id, book, category),
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
 def get_books(user_id: int) -> list[tuple[int, str]]:
     with sqlite3.connect(DB_PATH) as conn:
         rows = conn.execute(
@@ -762,9 +780,10 @@ async def on_ask_delete_book(callback: CallbackQuery) -> None:
         await callback.answer("Книга не найдена", show_alert=True)
         return
 
+    notes_count = count_book_notes(user_id, book)
     await safe_edit_message(
         callback.message,
-        f"Удалить книгу «{book}» и все заметки в ней?",
+        f"Удалить книгу «{book}»?\nБудет удалено заметок: {notes_count}",
         reply_markup=confirm_delete_keyboard(
             confirm_data=f"delbook:{book_ref_id}",
             cancel_data="browse_books",
@@ -883,10 +902,11 @@ async def on_ask_delete_category(callback: CallbackQuery) -> None:
         await callback.answer("Категория не найдена", show_alert=True)
         return
 
-    _, category = meta
+    book, category = meta
+    notes_count = count_category_notes(user_id, book, category)
     await safe_edit_message(
         callback.message,
-        f"Удалить категорию «{category}» и заметки внутри нее?",
+        f"Удалить категорию «{category}»?\nБудет удалено заметок: {notes_count}",
         reply_markup=confirm_delete_keyboard(
             confirm_data=f"delcat:{category_ref_id}:{book_ref_id}",
             cancel_data=f"book:{book_ref_id}",
@@ -1018,7 +1038,7 @@ async def on_ask_delete_note(callback: CallbackQuery) -> None:
     text_preview = compact_label(note[0], max_len=42)
     await safe_edit_message(
         callback.message,
-        f"Удалить заметку?\n\n{text_preview}",
+        f"Удалить только эту заметку?\nБудет удалено заметок: 1\n\n{text_preview}",
         reply_markup=confirm_delete_keyboard(
             confirm_data=f"delnote:{note_id}:{category_ref_id}",
             cancel_data=f"cat:{category_ref_id}",
