@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import sqlite3
 from datetime import datetime
@@ -14,6 +15,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 DB_PATH = "notes.db"
 router = Router()
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = logging.getLogger(__name__)
 
 
 class NoteFSM(StatesGroup):
@@ -745,7 +748,8 @@ async def on_delete_book(callback: CallbackQuery) -> None:
         await callback.answer("Книга уже удалена", show_alert=True)
         return
 
-    delete_book(user_id, book)
+    deleted = delete_book(user_id, book)
+    logger.info("DELETE_BOOK user_id=%s book=%s deleted=%s", user_id, book, deleted)
     books = get_books(user_id)
     if books:
         await safe_edit_message(
@@ -775,6 +779,7 @@ async def on_ask_delete_book(callback: CallbackQuery) -> None:
         return
 
     book_ref_id = int(ref_raw)
+    logger.info("ASK_DELETE_BOOK callback=%s user_id=%s", callback.data, user_id)
     book = get_book_by_ref(user_id, book_ref_id)
     if not book:
         await callback.answer("Книга не найдена", show_alert=True)
@@ -852,7 +857,14 @@ async def on_delete_category(callback: CallbackQuery) -> None:
         return
 
     book, category = meta
-    delete_category(user_id, book, category)
+    deleted = delete_category(user_id, book, category)
+    logger.info(
+        "DELETE_CATEGORY user_id=%s book=%s category=%s deleted=%s",
+        user_id,
+        book,
+        category,
+        deleted,
+    )
 
     categories = get_categories_by_book(user_id, book)
     book_ref_id = get_book_ref_id(user_id, book)
@@ -897,6 +909,7 @@ async def on_ask_delete_category(callback: CallbackQuery) -> None:
 
     category_ref_id = int(parts[1])
     book_ref_id = int(parts[2])
+    logger.info("ASK_DELETE_CATEGORY callback=%s user_id=%s", callback.data, user_id)
     meta = get_note_meta_by_ref(user_id, category_ref_id)
     if not meta:
         await callback.answer("Категория не найдена", show_alert=True)
@@ -970,7 +983,15 @@ async def on_delete_note(callback: CallbackQuery) -> None:
         return
 
     _, book, category, _ = note
-    delete_note(user_id, note_id)
+    deleted = delete_note(user_id, note_id)
+    logger.info(
+        "DELETE_NOTE user_id=%s note_id=%s book=%s category=%s deleted=%s",
+        user_id,
+        note_id,
+        book,
+        category,
+        deleted,
+    )
 
     notes = get_category_notes(user_id, book, category)
     book_ref_id = get_book_ref_id(user_id, book)
@@ -1030,6 +1051,7 @@ async def on_ask_delete_note(callback: CallbackQuery) -> None:
 
     note_id = int(parts[1])
     category_ref_id = int(parts[2])
+    logger.info("ASK_DELETE_NOTE callback=%s user_id=%s", callback.data, user_id)
     note = get_note_by_id(user_id, note_id)
     if not note:
         await callback.answer("Заметка не найдена", show_alert=True)
