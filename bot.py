@@ -199,7 +199,7 @@ def books_keyboard(books: list[tuple[int, str]]) -> InlineKeyboardMarkup:
         buttons.append(
             [
                 InlineKeyboardButton(text=compact_label(book), callback_data=f"book:{ref_id}"),
-                InlineKeyboardButton(text="🗑", callback_data=f"delbook:{ref_id}"),
+                InlineKeyboardButton(text="✕", callback_data=f"delbook:{ref_id}"),
             ]
         )
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_start")])
@@ -233,7 +233,7 @@ def categories_keyboard(
             [
                 InlineKeyboardButton(text=compact_label(category), callback_data=f"cat:{ref_id}"),
                 InlineKeyboardButton(
-                    text="🗑", callback_data=f"delcat:{ref_id}:{book_ref_id}"
+                    text="✕", callback_data=f"delcat:{ref_id}:{book_ref_id}"
                 ),
             ]
         )
@@ -261,7 +261,7 @@ def category_notes_keyboard(
                     text=note_button_label(text, created_at), callback_data=f"note:{note_id}"
                 ),
                 InlineKeyboardButton(
-                    text="🗑", callback_data=f"delnote:{note_id}:{category_ref_id}"
+                    text="✕", callback_data=f"delnote:{note_id}:{category_ref_id}"
                 ),
             ]
         )
@@ -281,7 +281,7 @@ def note_view_keyboard(book_ref_id: int, category_ref_id: int, note_id: int) -> 
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🗑 Удалить заметку",
+                    text="✕",
                     callback_data=f"delnote:{note_id}:{category_ref_id}",
                 )
             ],
